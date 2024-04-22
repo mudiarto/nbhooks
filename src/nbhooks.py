@@ -8,7 +8,7 @@ import sys
 import click
 import nbformat
 
-__version__ = "1.1.1"
+__version__ = "1.5.0"
 
 EXIT_CODES = {
     "clean": 0,
@@ -115,7 +115,7 @@ class DirtyNotebookError(Exception):
     pass
 
 
-def process_cell(cell, whitelist):
+def process_cell(cell, whitelist, fix):
     # Find issues
     issues = []
     for cls in CellIssue.__subclasses__():
@@ -125,9 +125,10 @@ def process_cell(cell, whitelist):
 
     # Fix issues
     fixed = []
-    for x in issues:
-        if x.fix() != -1:
-            fixed.append(x)
+    if fix:
+        for x in issues:
+            if x.fix() != -1:
+                fixed.append(x)
 
     # Print fixed
     messgs = [x.statement() for x in fixed]
@@ -142,18 +143,21 @@ def process_cell(cell, whitelist):
         echo("These issues:",             fg="red")  # noqa
         echo("- " + "\n- ".join(messgs),  fg="yellow")  # noqa
         echo("need fixing in this cell:", fg="red")
-        echo(json.dumps(cell, indent=4))
+        dumps = json.dumps(cell, indent=4)
+        # short_dumps = (dumps[:400] + '..') if len(dumps) > 400 else dumps
+        # echo(short_dumps) # TBD: shorter dumps
+        echo(dumps)
 
     # Report
     return bool(issues)
 
 
-def process_file(nb, whitelist):
+def process_file(nb, whitelist, fix):
 
     had_issues = False
     for cell in nb["cells"]:
         if cell["cell_type"] == "code":
-            had_issues |= process_cell(cell, whitelist)
+            had_issues |= process_cell(cell, whitelist, fix)
 
     if had_issues:
         raise DirtyNotebookError("Notebook had issues.")
@@ -165,10 +169,13 @@ def process_file(nb, whitelist):
 @click.command(context_settings=dict(help_option_names=["-h", "--help"]))
 @click.argument("src", required=False, nargs=-1)
 @click.option("-m", "--meta", multiple=True, default=["pin_output"],
-              help="A regular expression that matches WHITELISTED metadata keys "
+              help="Option to keep output if the cell's metadata keys matched these regular expressions. Default to 'pin_output'"
+              )
+@click.option("-f", "--fix", is_flag=True, default=False,
+              help="automatically fix issues. Default to False."
               )
 @click.pass_context
-def main(ctx: click.Context, src: str, meta: list):
+def main(ctx: click.Context, src: str, meta: list, fix):
     """
     Ensure that Jupyter notebooks given by SRC are clean,
     i.e. do not contain outputs, execution counts or blacklisted metadata keys.
@@ -204,7 +211,7 @@ def main(ctx: click.Context, src: str, meta: list):
         else:
             # Process
             try:
-                process_file(nb, meta)
+                process_file(nb, meta, fix)
 
             except DirtyNotebookError:
                 nbformat.write(nb, s)
